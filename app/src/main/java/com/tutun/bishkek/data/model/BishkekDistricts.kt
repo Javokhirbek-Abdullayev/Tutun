@@ -1,0 +1,86 @@
+package com.tutun.bishkek.data.model
+
+data class District(
+    val nameEn: String,
+    val nameKy: String,
+    val nameRu: String,
+    val nameUz: String,
+    val lat: Double,
+    val lon: Double,
+    val aqiMultiplier: Double,
+    val heatingZoneLabel: String, // "Coal zone" or "Low risk" or "Average"
+)
+
+val BISHKEK_DISTRICTS = listOf(
+    District(
+        "Bishkek South",
+        "Бишкек Түштүк",
+        "Бишкек Юг",
+        "Bishkek Janub",
+        42.8200,
+        74.5700,
+        0.65,
+        "Low risk",
+    ),
+    District(
+        "Oktyabrsky",
+        "Октябрь",
+        "Октябрьский",
+        "Oktyabrskiy",
+        42.8600,
+        74.5200,
+        0.75,
+        "Low risk",
+    ),
+    District(
+        "Chuy District",
+        "Чүй",
+        "Чуйский",
+        "Chuy",
+        42.8746,
+        74.5698,
+        0.85,
+        "Average",
+    ),
+    District(
+        "Sverdlovsky",
+        "Свердлов",
+        "Свердловский",
+        "Sverdlovskiy",
+        42.8900,
+        74.5900,
+        1.10,
+        "Average",
+    ),
+    District(
+        "Pervomaysky",
+        "Биринчи май",
+        "Первомайский",
+        "Pervomayskiy",
+        42.9100,
+        74.6200,
+        1.30,
+        "Coal zone",
+    ),
+    District(
+        "Leninskiy",
+        "Ленин",
+        "Ленинский",
+        "Leninskiy",
+        42.9200,
+        74.5400,
+        1.20,
+        "Coal zone",
+    ),
+    District(
+        "Alamedin",
+        "Аламүдүн",
+        "Аламединский",
+        "Alamedin",
+        42.9400,
+        74.6100,
+        1.45,
+        "Coal zone",
+    ),
+)
+

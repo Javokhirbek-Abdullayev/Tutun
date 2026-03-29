@@ -1,0 +1,6 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Night theme. Uses a built-in Android Material theme; Compose provides the UI theme. -->
+    <style name="Theme.Tutun" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <!-- Customize your night theme here if needed. -->
+    </style>
+</resources>
