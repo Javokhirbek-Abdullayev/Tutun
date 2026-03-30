@@ -66,12 +66,14 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.tutun.bishkek.data.model.AirBillCalculator
 import com.tutun.bishkek.data.model.BISHKEK_DISTRICTS
 import com.tutun.bishkek.data.model.CarouselCard
@@ -79,6 +81,8 @@ import com.tutun.bishkek.data.model.District
 import com.tutun.bishkek.data.model.HomeData
 import com.tutun.bishkek.data.model.OwmHourly
 import com.tutun.bishkek.viewmodel.HomeViewModel
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import java.text.SimpleDateFormat
 import java.time.Instant
 import java.time.ZoneId
@@ -90,6 +94,119 @@ import java.util.TimeZone
 import android.content.Intent
 import android.net.Uri
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+
+private fun tr(language: String, ky: String, ru: String, uz: String, en: String): String {
+    return when (language) {
+        "ky" -> ky
+        "ru" -> ru
+        "uz" -> uz
+        else -> en
+    }
+}
+
+private data class RemoteCarouselItem(
+    val id: String,
+    val badge: String,
+    val title: Map<String, String>,
+    val subtitle: Map<String, String>,
+    val image: String,
+    val link: String,
+)
+
+private fun pickLang(map: Map<String, String>, language: String): String {
+    return map[language] ?: map["en"] ?: map.values.firstOrNull().orEmpty()
+}
+
+private fun localizedWeatherDescription(language: String, rawDescription: String): String {
+    val v = rawDescription.trim().lowercase(Locale.ROOT)
+    return when (language) {
+        "ky" -> when {
+            v.contains("overcast") -> "Толук булут"
+            v.contains("clear") -> "Ачык асман"
+            v.contains("few clouds") || v.contains("few") -> "Аз булуттуу"
+            v.contains("scattered") -> "Чачыраган булут"
+            v.contains("broken") -> "Сынган булут"
+            v.contains("shower") || v.contains("rain") -> "Жаан"
+            v.contains("thunderstorm") -> "Найзағай"
+            v.contains("snow") -> "Кар"
+            v.contains("mist") || v.contains("fog") -> "Туман"
+            v.contains("haze") -> "Түтүнчө"
+            else -> rawDescription
+        }
+        "ru" -> when {
+            v.contains("overcast") -> "Пасмурно"
+            v.contains("clear") -> "Ясно"
+            v.contains("few clouds") || v.contains("few") -> "Небольшая облачность"
+            v.contains("scattered") -> "Рассеянные облака"
+            v.contains("broken") -> "Облачно"
+            v.contains("shower") || v.contains("rain") -> "Дождь"
+            v.contains("thunderstorm") -> "Гроза"
+            v.contains("snow") -> "Снег"
+            v.contains("mist") || v.contains("fog") -> "Туман"
+            v.contains("haze") -> "Дымка"
+            else -> rawDescription
+        }
+        "uz" -> when {
+            v.contains("overcast") -> "Bulutli"
+            v.contains("clear") -> "Ochiq osmon"
+            v.contains("few clouds") || v.contains("few") -> "Kam bulut"
+            v.contains("scattered") -> "Tarqoq bulut"
+            v.contains("broken") -> "Ayrim bulutlar"
+            v.contains("shower") || v.contains("rain") -> "Yomg'ir"
+            v.contains("thunderstorm") -> "Momaqaldiroq"
+            v.contains("snow") -> "Qor"
+            v.contains("mist") || v.contains("fog") -> "Tuman"
+            v.contains("haze") -> "Tuman"
+            else -> rawDescription
+        }
+        else -> rawDescription
+    }
+}
+
+private fun dayShort(language: String, dayOfWeek: java.time.DayOfWeek): String {
+    return when (language) {
+        "ky" -> when (dayOfWeek) {
+            java.time.DayOfWeek.MONDAY -> "Дш"
+            java.time.DayOfWeek.TUESDAY -> "Сш"
+            java.time.DayOfWeek.WEDNESDAY -> "Шш"
+            java.time.DayOfWeek.THURSDAY -> "Бш"
+            java.time.DayOfWeek.FRIDAY -> "Жу"
+            java.time.DayOfWeek.SATURDAY -> "Ша"
+            java.time.DayOfWeek.SUNDAY -> "Же"
+        }
+        "ru" -> when (dayOfWeek) {
+            java.time.DayOfWeek.MONDAY -> "Пн"
+            java.time.DayOfWeek.TUESDAY -> "Вт"
+            java.time.DayOfWeek.WEDNESDAY -> "Ср"
+            java.time.DayOfWeek.THURSDAY -> "Чт"
+            java.time.DayOfWeek.FRIDAY -> "Пт"
+            java.time.DayOfWeek.SATURDAY -> "Сб"
+            java.time.DayOfWeek.SUNDAY -> "Вс"
+        }
+        "uz" -> when (dayOfWeek) {
+            java.time.DayOfWeek.MONDAY -> "Dsh"
+            java.time.DayOfWeek.TUESDAY -> "Ses"
+            java.time.DayOfWeek.WEDNESDAY -> "Cho"
+            java.time.DayOfWeek.THURSDAY -> "Pay"
+            java.time.DayOfWeek.FRIDAY -> "Jum"
+            java.time.DayOfWeek.SATURDAY -> "Sha"
+            java.time.DayOfWeek.SUNDAY -> "Yak"
+        }
+        else -> when (dayOfWeek) {
+            java.time.DayOfWeek.MONDAY -> "MON"
+            java.time.DayOfWeek.TUESDAY -> "TUE"
+            java.time.DayOfWeek.WEDNESDAY -> "WED"
+            java.time.DayOfWeek.THURSDAY -> "THU"
+            java.time.DayOfWeek.FRIDAY -> "FRI"
+            java.time.DayOfWeek.SATURDAY -> "SAT"
+            java.time.DayOfWeek.SUNDAY -> "SUN"
+        }
+    }
+}
 
 @Composable
 fun HomeScreen(
@@ -184,13 +301,14 @@ fun HomeScreen(
             } else if (homeData.error != null) {
                 item {
                     ErrorStateCard(
+                        language = language,
                         error = homeData.error ?: "",
                         onRetry = { viewModel.fetchAllData() },
                     )
                 }
             } else {
                 item {
-                    CarouselSection(context = context)
+                    CarouselSection(language = language, context = context)
                 }
                 item { Spacer(Modifier.height(12.dp)) }
                 item {
@@ -207,6 +325,7 @@ fun HomeScreen(
                         windSpeed = windSpeed,
                         sunrise = sunrise,
                         sunset = sunset,
+                        language = language,
                     )
                 }
                 item { Spacer(Modifier.height(12.dp)) }
@@ -218,12 +337,18 @@ fun HomeScreen(
                 }
                 item { Spacer(Modifier.height(12.dp)) }
                 item {
-                    EightDayForecastSection(dailyForecast = dailyForecast)
+                    EightDayForecastSection(language = language, dailyForecast = dailyForecast)
                 }
                 item { Spacer(Modifier.height(12.dp)) }
                 item {
                     SectionHeading(
-                        title = "Air Pollutants",
+                        title = tr(
+                            language,
+                            ky = "Аба булганычтары",
+                            ru = "Загрязнители воздуха",
+                            uz = "Havo ifloslantiruvchilar",
+                            en = "Air Pollutants",
+                        ),
                         showInfo = true,
                     )
                 }
@@ -238,7 +363,15 @@ fun HomeScreen(
                 }
                 item { Spacer(Modifier.height(12.dp)) }
                 item {
-                    SectionHeading(title = "Bishkek Districts")
+                    SectionHeading(
+                        title = tr(
+                            language,
+                            ky = "Бишкектин райондору",
+                            ru = "Районы Бишкека",
+                            uz = "Bishkek tumanlari",
+                            en = "Bishkek Districts",
+                        )
+                    )
                 }
                 item {
                     DistrictsStrip(
@@ -252,16 +385,17 @@ fun HomeScreen(
                 item { Spacer(Modifier.height(12.dp)) }
                 if (!aiSummary.isNullOrBlank()) {
                     item {
-                        AiSummaryCard(aiSummary = aiSummary)
+                        AiSummaryCard(language = language, aiSummary = aiSummary)
                     }
                     item { Spacer(Modifier.height(12.dp)) }
                 }
                 item {
-                    PollutionSourcesCard()
+                    PollutionSourcesCard(language = language)
                 }
                 item { Spacer(Modifier.height(12.dp)) }
                 item {
                     AirBillTeaserCard(
+                        language = language,
                         dailyTotal = airBillResult.totalDaily,
                         healthcareCost = airBillResult.healthcareCost,
                         productivityCost = airBillResult.productivityCost,
@@ -397,10 +531,9 @@ private fun HeroCard(
     windSpeed: Double,
     sunrise: Long,
     sunset: Long,
+    language: String,
 ) {
-    val desc = weatherDescription.trim().replaceFirstChar { ch ->
-        if (ch.isLowerCase()) ch.titlecase() else ch.toString()
-    }
+    val desc = localizedWeatherDescription(language = language, rawDescription = weatherDescription)
     val cigarettes = formatCigarettesDisplay(cigarettesRaw)
     val cigaretteScroll = rememberScrollState()
 
@@ -437,7 +570,13 @@ private fun HeroCard(
                         color = Color(0xFF1A3A5C),
                     )
                     Text(
-                        text = "Air Quality Index",
+                        text = tr(
+                            language,
+                            ky = "Аба сапатынын индекси",
+                            ru = "Индекс качества воздуха",
+                            uz = "Havo sifati indeksi",
+                            en = "Air Quality Index",
+                        ),
                         fontSize = 11.sp,
                         color = Color(0xFF1A3A5C).copy(alpha = 0.6f),
                     )
@@ -450,7 +589,13 @@ private fun HeroCard(
                         color = Color(0xFF1A3A5C),
                     )
                     Text(
-                        text = "feels ${feelsLike.toInt()}°C",
+                        text = tr(
+                            language,
+                            ky = "сезилет ${feelsLike.toInt()}°C",
+                            ru = "ощущается ${feelsLike.toInt()}°C",
+                            uz = "seziladi ${feelsLike.toInt()}°C",
+                            en = "feels ${feelsLike.toInt()}°C",
+                        ),
                         fontSize = 13.sp,
                         color = Color(0xFF1A3A5C).copy(alpha = 0.7f),
                     )
@@ -473,7 +618,13 @@ private fun HeroCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "🚬 = $cigarettes cigarettes today just from breathing outside",
+                    text = tr(
+                        language,
+                        ky = "🚬 = $cigarettes бүгүн сыртта дем алган гана үчүн",
+                        ru = "🚬 = $cigarettes сигарет сегодня только от дыхания на улице",
+                        uz = "🚬 = $cigarettes bugun faqat tashqarida nafas olishdan",
+                        en = "🚬 = $cigarettes cigarettes today just from breathing outside",
+                    ),
                     fontSize = 12.sp,
                     color = Color(0xFF1A3A5C),
                     maxLines = 1,
@@ -605,20 +756,35 @@ private fun HourlyForecastStrip(
 
 @Composable
 private fun EightDayForecastSection(
+    language: String,
     dailyForecast: List<com.tutun.bishkek.data.model.OwmDaily>,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        SectionHeading(title = "8-Day Forecast")
+        SectionHeading(
+            title = tr(
+                language,
+                ky = "8 күндүк болжол",
+                ru = "Прогноз на 8 дней",
+                uz = "8 kunlik prognoz",
+                en = "8-Day Forecast",
+            )
+        )
         Spacer(Modifier.height(8.dp))
-        ForecastStrip(dailyForecast = dailyForecast)
+        ForecastStrip(language = language, dailyForecast = dailyForecast)
     }
 }
 
 @Composable
-private fun AiSummaryCard(aiSummary: String) {
+private fun AiSummaryCard(language: String, aiSummary: String) {
     FrosteredSectionCard {
         Text(
-            text = "🤖 Weather Summary",
+            text = tr(
+                language,
+                ky = "🤖 Аба ырайынын жыйынтыгы",
+                ru = "🤖 Сводка погоды",
+                uz = "🤖 Ob-havo xulosasi",
+                en = "🤖 Weather Summary",
+            ),
             color = Color(0xFF1A3A5C).copy(alpha = 0.6f),
             fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
@@ -640,7 +806,7 @@ private sealed class BottomSheetContent {
 }
 
 @Composable
-private fun ErrorStateCard(error: String, onRetry: () -> Unit) {
+private fun ErrorStateCard(language: String, error: String, onRetry: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -656,7 +822,16 @@ private fun ErrorStateCard(error: String, onRetry: () -> Unit) {
             Text(text = error, fontSize = 14.sp, color = Color(0xFF1A3A5C))
             Spacer(Modifier.height(16.dp))
             TextButton(onClick = onRetry) {
-                Text(text = "Try again", fontWeight = FontWeight.Bold)
+                Text(
+                    text = tr(
+                        language,
+                        ky = "Кайра аракет кылуу",
+                        ru = "Повторить",
+                        uz = "Qayta urinib ko‘ring",
+                        en = "Try again",
+                    ),
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
     }
@@ -840,6 +1015,7 @@ private fun pollutantColorAndLevel(key: String, value: Double): PollutantColorIn
 
 @Composable
 private fun ForecastStrip(
+    language: String,
     dailyForecast: List<com.tutun.bishkek.data.model.OwmDaily>,
 ) {
     val days = dailyForecast.take(8)
@@ -855,7 +1031,7 @@ private fun ForecastStrip(
             val iconCode = daily.weather.firstOrNull()?.icon
             val emoji = iconEmoji(iconCode)
             val rainPopText = if (daily.pop > 0.2) "💧${(daily.pop * 100).toInt()}%" else ""
-            val dayName = formatUnixSecondsToDayName(daily.dt)
+            val dayName = formatUnixSecondsToDayName(unixSeconds = daily.dt, language = language)
 
             Card(
                 modifier = Modifier
@@ -927,11 +1103,11 @@ private fun hourlyWeatherEmoji(iconCode: String?): String {
 
 private fun iconEmoji(iconCode: String?): String = hourlyWeatherEmoji(iconCode)
 
-private fun formatUnixSecondsToDayName(unixSeconds: Long): String {
+private fun formatUnixSecondsToDayName(unixSeconds: Long, language: String): String {
     val date = Instant.ofEpochSecond(unixSeconds)
         .atZone(ZoneId.systemDefault())
         .toLocalDate()
-    return date.dayOfWeek.name.take(3)
+    return dayShort(language = language, dayOfWeek = date.dayOfWeek)
 }
 
 @Composable
@@ -999,12 +1175,52 @@ private fun aqiColor(aqi: Int): Color {
 private data class SourceBar(val name: String, val fraction: Double, val color: Color)
 
 @Composable
-private fun PollutionSourcesCard() {
+private fun PollutionSourcesCard(language: String) {
     val sources = listOf(
-        SourceBar("🏠 Residential heating (coal)", 0.60, Color(0xFFEF5350)),
-        SourceBar("🚗 Vehicle emissions", 0.20, Color(0xFFFF7043)),
-        SourceBar("🏭 Industry & power plant", 0.10, Color(0xFFFFCA28)),
-        SourceBar("🌬️ Other sources", 0.10, Color(0xFF66BB6A)),
+        SourceBar(
+            tr(
+                language,
+                ky = "🏠 Үй жылытуу (көмүр)",
+                ru = "🏠 Отопление домов (уголь)",
+                uz = "🏠 Uy isitish (ko‘mir)",
+                en = "🏠 Residential heating (coal)",
+            ),
+            0.60,
+            Color(0xFFEF5350)
+        ),
+        SourceBar(
+            tr(
+                language,
+                ky = "🚗 Унаалардын чыгындылары",
+                ru = "🚗 Выбросы транспорта",
+                uz = "🚗 Avtomobil chiqindilari",
+                en = "🚗 Vehicle emissions",
+            ),
+            0.20,
+            Color(0xFFFF7043)
+        ),
+        SourceBar(
+            tr(
+                language,
+                ky = "🏭 Өндүрүш жана ЖЭБ",
+                ru = "🏭 Промышленность и ТЭЦ",
+                uz = "🏭 Sanoat va IES",
+                en = "🏭 Industry & power plant",
+            ),
+            0.10,
+            Color(0xFFFFCA28)
+        ),
+        SourceBar(
+            tr(
+                language,
+                ky = "🌬️ Башка булактар",
+                ru = "🌬️ Прочие булактар",
+                uz = "🌬️ Boshqa manbalar",
+                en = "🌬️ Other sources",
+            ),
+            0.10,
+            Color(0xFF66BB6A)
+        ),
     )
     Card(
         modifier = Modifier
@@ -1015,7 +1231,13 @@ private fun PollutionSourcesCard() {
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "What's polluting Bishkek?",
+                text = tr(
+                    language,
+                    ky = "Бишкекти эмне булгайт?",
+                    ru = "Что загрязняет Бишкек?",
+                    uz = "Bishkekni nima ifloslantiradi?",
+                    en = "What's polluting Bishkek?",
+                ),
                 color = Color(0xFF1A3A5C),
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
@@ -1026,7 +1248,13 @@ private fun PollutionSourcesCard() {
                 Spacer(Modifier.height(8.dp))
             }
             Text(
-                text = "Source: World Bank Bishkek Air Quality Report 2024",
+                text = tr(
+                    language,
+                    ky = "Булак: Дүйнөлүк банк, Бишкек аба сапаты отчету 2024",
+                    ru = "Источник: Всемирный банк, отчет по качеству воздуха Бишкека 2024",
+                    uz = "Manba: Jahon banki, Bishkek havo sifati hisoboti 2024",
+                    en = "Source: World Bank Bishkek Air Quality Report 2024",
+                ),
                 color = Color(0xFF1A3A5C).copy(alpha = 0.5f),
                 fontSize = 11.sp,
                 fontStyle = FontStyle.Italic,
@@ -1096,6 +1324,7 @@ private fun formatKgsShort(value: Double): String {
 
 @Composable
 private fun AirBillTeaserCard(
+    language: String,
     dailyTotal: Double,
     healthcareCost: Double,
     productivityCost: Double,
@@ -1122,17 +1351,31 @@ private fun AirBillTeaserCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "💸 Today's Air Cost",
+                    text = tr(
+                        language,
+                        ky = "💸 Бүгүнкү аба чыгымы",
+                        ru = "💸 Стоимость воздуха сегодня",
+                        uz = "💸 Bugungi havo xarajati",
+                        en = "💸 Today's Air Cost",
+                    ),
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFFD97706),
                 )
                 Text(
-                    text = "Details →",
+                    text = tr(
+                        language,
+                        ky = "Деталдар →",
+                        ru = "Детали →",
+                        uz = "Tafsilotlar →",
+                        en = "Details →",
+                    ),
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFFD97706),
                     modifier = Modifier.clickable { onDetails() },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
 
@@ -1177,68 +1420,52 @@ private fun AirBillTeaserCard(
 }
 
 @Composable
-private fun CarouselSection(context: android.content.Context) {
-    val cards = remember {
-        listOf(
-            CarouselCard(
-                id = 1,
-                type = "youtube",
-                title = "Why is Bishkek so polluted in winter?",
-                description = "A doctor explains what PM2.5 does to your lungs",
-                sourceBadge = "YouTube",
-                linkUrl = "https://youtube.com/results?search_query=bishkek+air+pollution",
-                bgColorHex = "#1A3A5C",
-            ),
-            CarouselCard(
-                id = 2,
-                type = "news",
-                title = "World Bank commits $50M to clean Bishkek air",
-                description = "New project targets coal-heated homes",
-                sourceBadge = "News",
-                linkUrl = "https://www.worldbank.org/en/country/kyrgyzrepublic",
-                bgColorHex = "#0D9488",
-            ),
-            CarouselCard(
-                id = 3,
-                type = "instagram",
-                title = "Bishkek smog captured by locals",
-                description = "A photo series showing visibility on bad air days",
-                sourceBadge = "Instagram",
-                linkUrl = "https://www.instagram.com/explore/tags/bishkeksmog/",
-                bgColorHex = "#6366F1",
-            ),
-            CarouselCard(
-                id = 4,
-                type = "app",
-                title = "IQAir — Track air worldwide",
-                description = "Compare Bishkek to any city in the world",
-                sourceBadge = "App",
-                linkUrl = "https://play.google.com/store/apps/details?id=air.visual.airvisual",
-                bgColorHex = "#16A34A",
-            ),
-            CarouselCard(
-                id = 5,
-                type = "news",
-                title = "UNICEF: Bishkek children face highest air risk",
-                description = "Children in north Bishkek exposed to 4x safe limits",
-                sourceBadge = "Research",
-                linkUrl = "https://www.unicef.org/kyrgyzstan/",
-                bgColorHex = "#D97706",
-            ),
-        )
+private fun CarouselSection(
+    language: String,
+    context: android.content.Context
+) {
+    val jsonUrl = "https://raw.githubusercontent.com/Javokhirbek-Abdullayev/tutun_content/main/carousel/v1.json"
+    val rawBase = "https://raw.githubusercontent.com/Javokhirbek-Abdullayev/tutun_content/main/"
+
+    var remoteItems by remember { mutableStateOf<List<RemoteCarouselItem>?>(null) }
+
+    LaunchedEffect(jsonUrl) {
+        try {
+            val body = withContext(Dispatchers.IO) {
+                val client = OkHttpClient()
+                val req = Request.Builder().url(jsonUrl).build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}")
+                    resp.body?.string().orEmpty()
+                }
+            }
+            val type = object : TypeToken<List<RemoteCarouselItem>>() {}.type
+            remoteItems = Gson().fromJson<List<RemoteCarouselItem>>(body, type)
+        } catch (_: Exception) {
+            remoteItems = null
+        }
     }
 
-    val pagerState = rememberPagerState(pageCount = { cards.size })
+    val items = remoteItems ?: emptyList()
+    if (items.isEmpty()) return
+
+    val pagerState = rememberPagerState(pageCount = { items.size })
 
     LaunchedEffect(pagerState) {
         while (true) {
             delay(5_000)
-            val next = (pagerState.currentPage + 1) % cards.size
+            val next = (pagerState.currentPage + 1) % items.size
             pagerState.animateScrollToPage(next)
         }
     }
 
-    val title = "Bishkek Air & Environment"
+    val title = tr(
+        language,
+        ky = "Бишкек аба жана чөйрө",
+        ru = "Воздух и среда Бишкека",
+        uz = "Bishkek havo va muhit",
+        en = "Bishkek Air & Environment",
+    )
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
@@ -1256,7 +1483,14 @@ private fun CarouselSection(context: android.content.Context) {
             contentPadding = PaddingValues(horizontal = 16.dp),
             pageSpacing = 12.dp,
         ) { page ->
-            CarouselCardItem(card = cards[page], context = context)
+            CarouselCardItem(
+                badge = items[page].badge,
+                title = pickLang(items[page].title, language),
+                subtitle = pickLang(items[page].subtitle, language),
+                imageUrl = rawBase + items[page].image,
+                linkUrl = items[page].link,
+                context = context,
+            )
         }
 
         Spacer(Modifier.height(8.dp))
@@ -1265,7 +1499,7 @@ private fun CarouselSection(context: android.content.Context) {
             contentAlignment = Alignment.Center,
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                cards.forEachIndexed { index, _ ->
+                items.forEachIndexed { index, _ ->
                     val isActive = index == pagerState.currentPage
                     Box(
                         modifier = Modifier
@@ -1286,18 +1520,42 @@ private fun CarouselSection(context: android.content.Context) {
 }
 
 @Composable
-private fun CarouselCardItem(card: CarouselCard, context: android.content.Context) {
-    val bg = Color(android.graphics.Color.parseColor(card.bgColorHex))
+private fun CarouselCardItem(
+    badge: String,
+    title: String,
+    subtitle: String,
+    imageUrl: String,
+    linkUrl: String,
+    context: android.content.Context,
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .height(160.dp),
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = bg),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A3A5C)),
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
+            AsyncImage(
+                model = imageUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Black.copy(alpha = 0.05f),
+                                Color.Black.copy(alpha = 0.55f),
+                            )
+                        )
+                    )
+            )
             Text(
-                text = card.sourceBadge,
+                text = badge,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color(0xFF1A3A5C),
@@ -1315,23 +1573,27 @@ private fun CarouselCardItem(card: CarouselCard, context: android.content.Contex
                 verticalArrangement = Arrangement.Bottom,
             ) {
                 Text(
-                    text = card.title,
+                    text = title,
                     color = Color.White,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = card.description,
+                    text = subtitle,
                     color = Color.White.copy(alpha = 0.85f),
                     fontSize = 12.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .clickable {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(card.linkUrl))
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(linkUrl))
                         context.startActivity(intent)
                     },
             )
@@ -1360,13 +1622,28 @@ private fun BottomSheetBody(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "Details",
+                text = tr(
+                    language,
+                    ky = "Деталдар",
+                    ru = "Детали",
+                    uz = "Tafsilotlar",
+                    en = "Details",
+                ),
                 color = Color(0xFF1A3A5C),
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
             )
             TextButton(onClick = onClose) {
-                Text(text = "Close", fontWeight = FontWeight.Bold)
+                Text(
+                    text = tr(
+                        language,
+                        ky = "Жабуу",
+                        ru = "Закрыть",
+                        uz = "Yopish",
+                        en = "Close",
+                    ),
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
 
@@ -1388,7 +1665,7 @@ private fun BottomSheetBody(
 
                 val info = pollutantColorAndLevel(key, value)
                 val fullName = dominantPollutantLabel(key)
-                val sourceSentence = pollutantSourceSentence(key)
+                val sourceSentence = pollutantSourceSentence(language, key)
 
                 Text(
                     text = fullName,
@@ -1398,13 +1675,25 @@ private fun BottomSheetBody(
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "Current value: ${String.format("%.1f", value)} ${pollutantUnit(key)}",
+                    text = tr(
+                        language,
+                        ky = "Азыркы көрсөткүч: ${String.format("%.1f", value)} ${pollutantUnit(key)}",
+                        ru = "Текущее значение: ${String.format("%.1f", value)} ${pollutantUnit(key)}",
+                        uz = "Joriy qiymat: ${String.format("%.1f", value)} ${pollutantUnit(key)}",
+                        en = "Current value: ${String.format("%.1f", value)} ${pollutantUnit(key)}",
+                    ),
                     fontSize = 14.sp,
                     color = Color(0xFF1A3A5C).copy(alpha = 0.85f),
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "Level: ${info.levelLabel}",
+                    text = tr(
+                        language,
+                        ky = "Деңгээли: ${info.levelLabel}",
+                        ru = "Уровень: ${info.levelLabel}",
+                        uz = "Daraja: ${info.levelLabel}",
+                        en = "Level: ${info.levelLabel}",
+                    ),
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     color = info.color,
@@ -1456,14 +1745,20 @@ private fun BottomSheetBody(
                 }
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    text = "Estimated AQI: $estimatedAqi",
+                    text = tr(
+                        language,
+                        ky = "Болжолдуу AQI: $estimatedAqi",
+                        ru = "Оценочный AQI: $estimatedAqi",
+                        uz = "Taxminiy AQI: $estimatedAqi",
+                        en = "Estimated AQI: $estimatedAqi",
+                    ),
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF1A3A5C),
                 )
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    text = districtExplanationSentence(district),
+                    text = districtExplanationSentence(language, district),
                     fontSize = 13.sp,
                     color = Color(0xFF1A3A5C).copy(alpha = 0.75f),
                     fontStyle = FontStyle.Italic,
@@ -1472,7 +1767,13 @@ private fun BottomSheetBody(
 
             BottomSheetContent.AirBillSheet -> {
                 Text(
-                    text = "Today's Air Cost Breakdown",
+                    text = tr(
+                        language,
+                        ky = "Бүгүнкү аба чыгымынын бөлүштүрүлүшү",
+                        ru = "Разбивка стоимости воздуха за сегодня",
+                        uz = "Bugungi havo xarajatlari tafsiloti",
+                        en = "Today's Air Cost Breakdown",
+                    ),
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF1A3A5C),
@@ -1480,7 +1781,13 @@ private fun BottomSheetBody(
                 Spacer(Modifier.height(8.dp))
 
                 Text(
-                    text = "Today: ~${airBillResult.totalDaily.toInt()} KGS   •   Month: ~${airBillResult.totalMonthly.toInt()} KGS   •   Year: ~${airBillResult.totalYearly.toInt()} KGS",
+                    text = tr(
+                        language,
+                        ky = "Бүгүн: ~${airBillResult.totalDaily.toInt()} KGS   •   Ай: ~${airBillResult.totalMonthly.toInt()} KGS   •   Жыл: ~${airBillResult.totalYearly.toInt()} KGS",
+                        ru = "Сегодня: ~${airBillResult.totalDaily.toInt()} KGS   •   Месяц: ~${airBillResult.totalMonthly.toInt()} KGS   •   Год: ~${airBillResult.totalYearly.toInt()} KGS",
+                        uz = "Bugun: ~${airBillResult.totalDaily.toInt()} KGS   •   Oy: ~${airBillResult.totalMonthly.toInt()} KGS   •   Yil: ~${airBillResult.totalYearly.toInt()} KGS",
+                        en = "Today: ~${airBillResult.totalDaily.toInt()} KGS   •   Month: ~${airBillResult.totalMonthly.toInt()} KGS   •   Year: ~${airBillResult.totalYearly.toInt()} KGS",
+                    ),
                     fontSize = 13.sp,
                     color = Color(0xFF1A3A5C).copy(alpha = 0.85f),
                 )
@@ -1490,42 +1797,75 @@ private fun BottomSheetBody(
                 var expanded by remember { mutableStateOf(setOf<String>()) }
 
                 receiptLine(
+                    language = language,
                     key = "Healthcare",
-                    title = "🏥 Healthcare",
+                    title = tr(language, ky = "🏥 Ден соолук", ru = "🏥 Здоровье", uz = "🏥 Sog‘liq", en = "🏥 Healthcare"),
                     value = airBillResult.healthcareCost.toInt().toString(),
-                    description = "Covers expected doctor visits and medication needs related to elevated PM2.5 exposure.",
+                    description = tr(
+                        language,
+                        ky = "PM2.5 жогору болгондо дарыгерге баруу жана дары-дармек чыгымдарын эсептейт.",
+                        ru = "Покрывает ожидаемые визиты к врачу и лекарства при повышенном воздействии PM2.5.",
+                        uz = "PM2.5 yuqori bo‘lganda shifokor qabuliga borish va dori xarajatlarini baholaydi.",
+                        en = "Covers expected doctor visits and medication needs related to elevated PM2.5 exposure.",
+                    ),
                     expandedKeys = expanded,
                     onToggle = { newSet -> expanded = newSet },
                 )
 
                 receiptLine(
+                    language = language,
                     key = "Productivity",
-                    title = "⚡ Productivity",
+                    title = tr(language, ky = "⚡ Өндүрүмдүүлүк", ru = "⚡ Продуктивность", uz = "⚡ Samaradorlik", en = "⚡ Productivity"),
                     value = airBillResult.productivityCost.toInt().toString(),
-                    description = "Estimates lost daily productivity due to reduced health performance at higher particulate levels.",
+                    description = tr(
+                        language,
+                        ky = "Бөлүкчөлөр көбөйгөндө ден соолукка таасир этип, күнүмдүк өндүрүмдүүлүк азайышын эсептейт.",
+                        ru = "Оценивает потерю дневной продуктивности из‑за ухудшения самочувствия при высоких частицах.",
+                        uz = "Zarralar ko‘payganda sog‘liq pasayishi sababli kunlik samaradorlik yo‘qotilishini baholaydi.",
+                        en = "Estimates lost daily productivity due to reduced health performance at higher particulate levels.",
+                    ),
                     expandedKeys = expanded,
                     onToggle = { newSet -> expanded = newSet },
                 )
 
                 receiptLine(
+                    language = language,
                     key = "Prevention",
-                    title = "🛡️ Prevention",
+                    title = tr(language, ky = "🛡️ Алдын алуу", ru = "🛡️ Профилактика", uz = "🛡️ Oldini olish", en = "🛡️ Prevention"),
                     value = airBillResult.preventiveCost.toInt().toString(),
-                    description = "Represents protective actions (masks) plus extra burden in higher heating-risk zones.",
+                    description = tr(
+                        language,
+                        ky = "Коргонуу чараларын (маска) жана көмүр зонасындагы кошумча жүктү камтыйт.",
+                        ru = "Включает защитные меры (маски) и дополнительную нагрузку в зонах высокого риска отопления.",
+                        uz = "Himoya choralari (niqob) va isitish xavfi yuqori hududlarda qo‘shimcha yukni hisobga oladi.",
+                        en = "Represents protective actions (masks) plus extra burden in higher heating-risk zones.",
+                    ),
                     expandedKeys = expanded,
                     onToggle = { newSet -> expanded = newSet },
                 )
 
                 Spacer(Modifier.height(14.dp))
                 Text(
-                    text = "What this means",
+                    text = tr(
+                        language,
+                        ky = "Бул эмнени билдирет",
+                        ru = "Что это значит",
+                        uz = "Bu nimani anglatadi",
+                        en = "What this means",
+                    ),
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF1A3A5C),
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "When the air gets worse, health impacts and everyday costs rise together. This breakdown helps compare how pollution translates into real, daily trade-offs in Bishkek.",
+                    text = tr(
+                        language,
+                        ky = "Аба начарлаганда, ден соолукка таасир жана күнүмдүк чыгымдар кошо өсөт. Бул бөлүштүрүү Бишкекте булгануу кандайча чыныгы күнүмдүк чыгымга айланарын көрсөтөт.",
+                        ru = "Когда воздух становится хуже, растут и риски для здоровья, и повседневные расходы. Эта разбивка помогает понять, во что превращается загрязнение в Бишкеке каждый день.",
+                        uz = "Havo yomonlashsa, sog‘liqka ta’sir ham, kundalik xarajatlar ham oshadi. Bu tafsilot Bishkekda ifloslanish qanday real kundalik xarajatlarga aylanishini ko‘rsatadi.",
+                        en = "When the air gets worse, health impacts and everyday costs rise together. This breakdown helps compare how pollution translates into real, daily trade-offs in Bishkek.",
+                    ),
                     fontSize = 13.sp,
                     color = Color(0xFF1A3A5C).copy(alpha = 0.75f),
                     fontStyle = FontStyle.Italic,
@@ -1537,6 +1877,7 @@ private fun BottomSheetBody(
 
 @Composable
 private fun receiptLine(
+    language: String,
     key: String,
     title: String,
     value: String,
@@ -1571,7 +1912,11 @@ private fun receiptLine(
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                text = if (isExpanded) "Tap to hide" else "Tap to expand",
+                text = if (isExpanded) {
+                    tr(language, ky = "Жашыруу үчүн тапта", ru = "Нажмите, чтобы скрыть", uz = "Yashirish uchun bosing", en = "Tap to hide")
+                } else {
+                    tr(language, ky = "Көрүү үчүн тапта", ru = "Нажмите, чтобы раскрыть", uz = "Ko‘rish uchun bosing", en = "Tap to expand")
+                },
                 fontSize = 12.sp,
                 color = Color(0xFF1A3A5C).copy(alpha = 0.55f),
                 modifier = Modifier.clickable {
@@ -1583,23 +1928,83 @@ private fun receiptLine(
     }
 }
 
-private fun pollutantSourceSentence(key: String): String {
+private fun pollutantSourceSentence(language: String, key: String): String {
     return when (key) {
-        "pm25" -> "Mainly from coal heating stoves in residential areas."
-        "pm10" -> "Dust from roads and construction sites."
-        "no2" -> "Primarily from vehicle exhaust in Bishkek traffic."
-        "so2" -> "From coal burning and the Bishkek thermal power plant."
-        "co" -> "From incomplete combustion in vehicles and stoves."
-        "o3" -> "Forms in sunlight from vehicle and industrial emissions."
-        else -> "From multiple sources across Bishkek."
+        "pm25" -> tr(
+            language,
+            ky = "Негизинен турак жайлардагы көмүр мештеринен чыгат.",
+            ru = "В основном из-за угольного отопления в жилых районах.",
+            uz = "Asosan turar-joylarda ko‘mir yoqishdan kelib chiqadi.",
+            en = "Mainly from coal heating stoves in residential areas.",
+        )
+        "pm10" -> tr(
+            language,
+            ky = "Жолдордон жана курулуштардан чыккан чаң.",
+            ru = "Пыль с дорог и строительных площадок.",
+            uz = "Yo‘llar va qurilishlardan chiqqan chang.",
+            en = "Dust from roads and construction sites.",
+        )
+        "no2" -> tr(
+            language,
+            ky = "Көбүнчө Бишкектеги унаа түтүндөрүнөн.",
+            ru = "В основном из выхлопов транспорта в Бишкеке.",
+            uz = "Asosan Bishkekdagi avtomobil chiqindilaridan.",
+            en = "Primarily from vehicle exhaust in Bishkek traffic.",
+        )
+        "so2" -> tr(
+            language,
+            ky = "Көмүр жагуудан жана Бишкек ЖЭБинен.",
+            ru = "От сжигания угля и Бишкекской ТЭЦ.",
+            uz = "Ko‘mir yoqish va Bishkek IESdan.",
+            en = "From coal burning and the Bishkek thermal power plant.",
+        )
+        "co" -> tr(
+            language,
+            ky = "Унаалар жана мештердеги толук эмес күйүүдөн.",
+            ru = "Из-за неполного сгорания в транспорте и печах.",
+            uz = "Avtomobil va pechlarda to‘liq yonmaslikdan.",
+            en = "From incomplete combustion in vehicles and stoves.",
+        )
+        "o3" -> tr(
+            language,
+            ky = "Күндүн нурунда унаа жана өнөр жай чыгындыларынан пайда болот.",
+            ru = "Образуется на солнце из выбросов транспорта и промышленности.",
+            uz = "Quyoshda transport va sanoat chiqindilaridan hosil bo‘ladi.",
+            en = "Forms in sunlight from vehicle and industrial emissions.",
+        )
+        else -> tr(
+            language,
+            ky = "Бишкекте ар кандай булактардан чыгат.",
+            ru = "Из нескольких источников по всему городу.",
+            uz = "Shahardagi turli manbalardan.",
+            en = "From multiple sources across Bishkek.",
+        )
     }
 }
 
-private fun districtExplanationSentence(district: District): String {
+private fun districtExplanationSentence(language: String, district: District): String {
     return when (district.heatingZoneLabel) {
-        "Coal zone" -> "Air quality is worse here during heating season due to coal combustion emissions and colder stagnant conditions."
-        "Average" -> "Pollution levels are moderate, influenced by both traffic and dispersed residential heating sources."
-        else -> "Lower heating-risk conditions help reduce emissions, so AQI stays closer to the safer range."
+        "Coal zone" -> tr(
+            language,
+            ky = "Жылытуу маалында көмүр жагуудан жана абанын токтоп калышынан аба сапаты бул жерде начарлайт.",
+            ru = "В отопительный сезон качество воздуха здесь хуже из‑за угольных выбросов и застойных условий.",
+            uz = "Isitish mavsumida ko‘mir yoqish va turg‘un havo sabab bu yerda havo sifati yomonroq bo‘ladi.",
+            en = "Air quality is worse here during heating season due to coal combustion emissions and colder stagnant conditions.",
+        )
+        "Average" -> tr(
+            language,
+            ky = "Бул жерде булгануу орточо: жол кыймылы жана үй жылытуудан таасир этет.",
+            ru = "Здесь умеренное загрязнение: влияет и транспорт, и отопление домов.",
+            uz = "Bu yerda ifloslanish o‘rtacha: transport va uy isitishi ta’sir qiladi.",
+            en = "Pollution levels are moderate, influenced by both traffic and dispersed residential heating sources.",
+        )
+        else -> tr(
+            language,
+            ky = "Жылытуу тобокелдиги төмөн болгондуктан чыгындылар азайып, AQI коопсузураакка жакын болот.",
+            ru = "Из‑за более низкого риска отопления выбросов меньше, поэтому AQI ближе к безопасному уровню.",
+            uz = "Isitish xavfi past bo‘lgani uchun chiqindilar kamroq, AQI xavfsizroq darajaga yaqin bo‘ladi.",
+            en = "Lower heating-risk conditions help reduce emissions, so AQI stays closer to the safer range.",
+        )
     }
 }
 
